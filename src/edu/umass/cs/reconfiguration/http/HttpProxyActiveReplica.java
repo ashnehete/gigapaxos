@@ -44,6 +44,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 /**
  * An HTTP front-end for an active replica that supports interaction
  * between a http client and this front-end.
+ * It encodes the entire HTTP request into a JSON format.
  * To use this HTTP front-end, the underlying application use the request
  * type {@link HttpActiveReplicaRequest} or a type that extends {@link HttpActiveReplicaRequest}.
  * <p>
@@ -51,7 +52,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
  * documentation page:
  * https://github.com/netty/netty/blob/4.1/example/src/main/java/io/netty/example/http/snoop/HttpSnoopServerHandler.java
  * <p>
- * A similar implementation to {@link HttpReconfigurator}
+ * A similar implementation to {@link HttpActiveReplica}
  * <p>
  * Example command:
  * <p>
