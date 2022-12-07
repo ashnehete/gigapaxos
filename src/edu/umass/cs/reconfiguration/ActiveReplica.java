@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import edu.umass.cs.reconfiguration.http.HttpProxyActiveReplica;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -220,7 +221,7 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 		
 		try {
 			// initialize HTTP server
-			new HttpActiveReplica(this, addr, ssl);
+			new HttpProxyActiveReplica(this, addr, ssl);
 			
 		} catch (Exception e) {
 			if (!(e instanceof InterruptedException)) // close

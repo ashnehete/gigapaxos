@@ -1,24 +1,5 @@
 package edu.umass.cs.reconfiguration.http;
 
-import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
-import static io.netty.handler.codec.http.HttpResponseStatus.CONTINUE;
-import static io.netty.handler.codec.http.HttpResponseStatus.OK;
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
-
-import java.net.InetSocketAddress;
-import java.security.cert.CertificateException;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-import javax.net.ssl.SSLException;
-
-import org.json.JSONException;
-import org.json.JSONObject;
-
 import edu.umass.cs.gigapaxos.interfaces.ExecutedCallback;
 import edu.umass.cs.gigapaxos.interfaces.Request;
 import edu.umass.cs.reconfiguration.ReconfigurationConfig;
@@ -27,29 +8,11 @@ import edu.umass.cs.reconfiguration.reconfigurationpackets.ReplicableClientReque
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.http.DefaultFullHttpResponse;
-import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpContent;
-import io.netty.handler.codec.http.HttpHeaderNames;
-import io.netty.handler.codec.http.HttpHeaderValues;
-import io.netty.handler.codec.http.HttpObject;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.codec.http.HttpResponseEncoder;
-import io.netty.handler.codec.http.HttpUtil;
-import io.netty.handler.codec.http.LastHttpContent;
-import io.netty.handler.codec.http.QueryStringDecoder;
+import io.netty.handler.codec.http.*;
 import io.netty.handler.codec.http.cookie.Cookie;
 import io.netty.handler.codec.http.cookie.ServerCookieDecoder;
 import io.netty.handler.codec.http.cookie.ServerCookieEncoder;
@@ -61,6 +24,22 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.util.CharsetUtil;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import javax.net.ssl.SSLException;
+import java.net.InetSocketAddress;
+import java.security.cert.CertificateException;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import static io.netty.handler.codec.http.HttpResponseStatus.*;
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  * An HTTP front-end for an active replica that supports interaction
@@ -93,7 +72,7 @@ import io.netty.util.CharsetUtil;
  *
  * @author gaozy
  */
-public class HttpActiveReplica {
+public class HttpProxyActiveReplica {
 
     private static final Logger log = ReconfigurationConfig.getLogger();
 
@@ -120,8 +99,8 @@ public class HttpActiveReplica {
      * @throws SSLException
      * @throws InterruptedException
      */
-    public HttpActiveReplica(ActiveReplicaFunctions arf,
-                             boolean ssl) throws CertificateException, SSLException, InterruptedException {
+    public HttpProxyActiveReplica(ActiveReplicaFunctions arf,
+                                  boolean ssl) throws CertificateException, SSLException, InterruptedException {
         this(arf, null, ssl);
     }
 
@@ -133,8 +112,8 @@ public class HttpActiveReplica {
      * @throws SSLException
      * @throws InterruptedException
      */
-    public HttpActiveReplica(ActiveReplicaFunctions arf,
-                             InetSocketAddress sockAddr, boolean ssl)
+    public HttpProxyActiveReplica(ActiveReplicaFunctions arf,
+                                  InetSocketAddress sockAddr, boolean ssl)
             throws CertificateException, SSLException, InterruptedException {
 
         // Configure SSL.
@@ -158,7 +137,7 @@ public class HttpActiveReplica {
                     .channel(NioServerSocketChannel.class)
                     .handler(new LoggingHandler(LogLevel.INFO))
                     .childHandler(
-                            new HttpActiveReplicaInitializer(arf, sslCtx)
+                            new HttpProxyActiveReplicaInitializer(arf, sslCtx)
                     );
 
             if (sockAddr == null) {
@@ -194,14 +173,14 @@ public class HttpActiveReplica {
     }
 
 
-    private static class HttpActiveReplicaInitializer extends
+    private static class HttpProxyActiveReplicaInitializer extends
             ChannelInitializer<SocketChannel> {
 
         private final SslContext sslCtx;
         final ActiveReplicaFunctions arFunctions;
 
-        HttpActiveReplicaInitializer(final ActiveReplicaFunctions arf,
-                                     SslContext sslCtx) {
+        HttpProxyActiveReplicaInitializer(final ActiveReplicaFunctions arf,
+                                          SslContext sslCtx) {
             this.arFunctions = arf;
             this.sslCtx = sslCtx;
         }
@@ -224,7 +203,7 @@ public class HttpActiveReplica {
 
             p.addLast(new CorsHandler(corsConfig));
 
-            p.addLast(new HttpActiveReplicaHandler(arFunctions, channel.remoteAddress()));
+            p.addLast(new HttpProxyActiveReplicaHandler(arFunctions, channel.remoteAddress()));
 
         }
 
@@ -250,6 +229,35 @@ public class HttpActiveReplica {
 
     }
 
+    private static JSONArray getJSONArrayFromHeaders(HttpHeaders headers) {
+        JSONArray arr = new JSONArray();
+        for (Map.Entry<String, String> entry : headers.entries()) {
+            try {
+                JSONObject json = new JSONObject();
+                json.put(entry.getKey(), entry.getValue());
+                arr.put(json);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+        return arr;
+    }
+
+
+    private static HttpActiveReplicaRequest getRequestFromJSONObject(String name, JSONObject json) throws Exception {
+        if (name == null) {
+            throw new Exception("service name cannot be null");
+        }
+
+        int qid = (int) (Math.random() * Integer.MAX_VALUE);
+        int epoch = 0;
+        boolean stop = false;
+        boolean coord = true;
+
+        String qval = json.toString();
+
+        return new HttpActiveReplicaRequest(HttpActiveReplicaPacketType.EXECUTE, name, qid, qval, coord, stop, epoch);
+    }
 
     /**
      * The json object must contain the following keys to be a valid request:
@@ -295,22 +303,23 @@ public class HttpActiveReplica {
                 name, qid, qval, coord, stop, epoch);
     }
 
-    private static class HttpExecutedCallback implements ExecutedCallback {
+    private static class HttpProxyExecutedCallback implements ExecutedCallback {
 
         StringBuilder buf;
         Object lock;
         // boolean finished;
 
-        HttpExecutedCallback(StringBuilder buf, Object lock) {
+        HttpProxyExecutedCallback(StringBuilder buf, Object lock) {
             this.buf = buf;
             this.lock = lock;
         }
 
         @Override
         public void executed(Request response, boolean handled) {
-
-            buf.append("RESPONSE:\n\r");
-            buf.append(response);
+            if (response instanceof HttpActiveReplicaRequest)
+                buf.append(((HttpActiveReplicaRequest) response).getValue());
+            else
+                buf.append(response);
 
             synchronized (lock) {
                 finished = true;
@@ -321,7 +330,7 @@ public class HttpActiveReplica {
     }
 
 
-    private static class HttpActiveReplicaHandler extends
+    private static class HttpProxyActiveReplicaHandler extends
             SimpleChannelInboundHandler<Object> {
 
         ActiveReplicaFunctions arFunctions;
@@ -333,7 +342,7 @@ public class HttpActiveReplica {
          */
         private final StringBuilder buf = new StringBuilder();
 
-        HttpActiveReplicaHandler(ActiveReplicaFunctions arFunctions, InetSocketAddress addr) {
+        HttpProxyActiveReplicaHandler(ActiveReplicaFunctions arFunctions, InetSocketAddress addr) {
             this.arFunctions = arFunctions;
             this.senderAddr = addr;
         }
@@ -362,6 +371,8 @@ public class HttpActiveReplica {
              */
             boolean retrieved = false;
 
+            String serviceName = null;
+
             if (msg instanceof HttpRequest) {
                 HttpRequest httpRequest = this.request = (HttpRequest) msg;
                 buf.setLength(0);
@@ -372,46 +383,34 @@ public class HttpActiveReplica {
 
                 log.log(Level.FINE, "Http server received a request with HttpRequest: {0}", new Object[]{httpRequest});
 
-                Map<String, List<String>> params = (new QueryStringDecoder(httpRequest.uri())).parameters();
-                if (!params.isEmpty()) {
-                    for (Entry<String, List<String>> p : params.entrySet()) {
-                        String key = p.getKey();
-                        List<String> vals = p.getValue();
-                        for (String val : vals) {
-                            // put the key-value pair into json
-                            json.put(key.toUpperCase(), val);
-                        }
-                    }
-                }
+                String method = httpRequest.method().name();
+                String uri = httpRequest.uri();
+                HttpHeaders headers = httpRequest.headers();
 
-                if (json != null && json.length() > 0)
-                    try {
-                        gRequest = getRequestFromJSONObject(json);
-                        log.log(Level.INFO, "Http server retrieved an HttpActiveReplicaRequest from HttpRequest: {0}", new Object[]{gRequest});
-                        retrieved = true;
-                    } catch (Exception e) {
-                        // ignore and do nothing if this is a malformed request
-                        e.printStackTrace();
-                    }
+                json.put("method", method);
+                json.put("uri", uri);
+                json.put("headers", getJSONArrayFromHeaders(headers));
+
+                serviceName = headers.get(HttpHeaderNames.HOST);
             }
 
             if (msg instanceof HttpContent) {
+                HttpContent httpContent = (HttpContent) msg;
+                log.log(Level.INFO, "Http server received a request with HttpContent: {0}", new Object[]{httpContent});
+                if (httpContent != null) {
 
-                if (!retrieved) {
-                    HttpContent httpContent = (HttpContent) msg;
-                    log.log(Level.INFO, "Http server received a request with HttpContent: {0}", new Object[]{httpContent});
-                    if (httpContent != null) {
-                        json = getJSONObjectFromHttpContent(httpContent);
-                        if (json != null && json.length() > 0)
-                            try {
-                                gRequest = getRequestFromJSONObject(json);
-                                retrieved = true;
-                            } catch (Exception e) {
-                                // TODO: A malformed request, we can send back the response here
-                                e.printStackTrace();
-                            }
+                    if (httpContent.content().isReadable()) {
+                        json.put("body", httpContent.content().toString(CharsetUtil.UTF_8));
                     }
 
+                    if (json != null && json.length() > 0)
+                        try {
+                            gRequest = getRequestFromJSONObject(serviceName, json);
+                            retrieved = true;
+                        } catch (Exception e) {
+                            // TODO: A malformed request, we can send back the response here
+                            e.printStackTrace();
+                        }
                 }
 
                 if (msg instanceof LastHttpContent) {
@@ -419,7 +418,7 @@ public class HttpActiveReplica {
                         log.log(Level.INFO, "About to execute request: {0}", new Object[]{gRequest});
                         Object lock = new Object();
                         finished = false;
-                        ExecutedCallback callback = new HttpExecutedCallback(buf, lock);
+                        ExecutedCallback callback = new HttpProxyExecutedCallback(buf, lock);
 
                         // execute GigaPaxos request here
                         if (arFunctions != null) {
@@ -525,7 +524,7 @@ public class HttpActiveReplica {
      * @throws InterruptedException
      */
     public static void main(String[] args) throws CertificateException, SSLException, InterruptedException {
-        new HttpActiveReplica(null, new InetSocketAddress(8080), false);
+        new HttpProxyActiveReplica(null, new InetSocketAddress(8080), false);
     }
 
 }
